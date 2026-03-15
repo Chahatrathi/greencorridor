@@ -1,0 +1,123 @@
+/* GLOBAL SETTINGS */
+* {
+    margin: 0;
+    padding: 0;
+    box-sizing: border-box;
+}
+
+body {
+    background-color: #020617; /* Deep Space Blue */
+    color: #f8fafc;
+    font-family: 'Segoe UI', Roboto, Helvetica, Arial, sans-serif;
+    display: flex;
+    justify-content: center;
+    align-items: center;
+    min-height: 100vh;
+    overflow-x: hidden;
+}
+
+/* Glassmorphism Effect */
+.glass-panel {
+    background: rgba(15, 23, 42, 0.8);
+    backdrop-filter: blur(12px);
+    border: 1px solid rgba(6, 182, 212, 0.2);
+    border-radius: 24px;
+    padding: 3rem;
+    box-shadow: 0 0 50px rgba(0, 0, 0, 0.5), 0 0 20px rgba(6, 182, 212, 0.1);
+    text-align: center;
+    width: 100%;
+    max-width: 500px;
+    position: relative;
+}
+
+/* Titles and Text */
+.glow-title {
+    font-size: 3rem;
+    font-weight: 900;
+    text-transform: uppercase;
+    letter-spacing: 4px;
+    background: linear-gradient(to bottom, #fff, #94a3b8);
+    -webkit-background-clip: text;
+    -webkit-text-fill-color: transparent;
+    filter: drop-shadow(0 0 10px rgba(6, 182, 212, 0.5));
+    margin-bottom: 0.5rem;
+}
+
+.system-status {
+    color: #22c55e;
+    font-family: monospace;
+    font-size: 0.8rem;
+    letter-spacing: 2px;
+    margin-bottom: 1rem;
+}
+
+/* Buttons */
+.neon-btn {
+    display: inline-block;
+    margin-top: 2rem;
+    padding: 1rem 2.5rem;
+    background: transparent;
+    border: 2px solid #06b6d4;
+    color: #06b6d4;
+    text-decoration: none;
+    font-weight: bold;
+    border-radius: 8px;
+    transition: all 0.3s ease;
+    box-shadow: inset 0 0 10px rgba(6, 182, 212, 0.2);
+}
+
+.neon-btn:hover {
+    background: #06b6d4;
+    color: #fff;
+    box-shadow: 0 0 30px rgba(6, 182, 212, 0.6);
+    transform: translateY(-2px);
+}
+
+/* Login Tab Styling */
+.tab-container {
+    display: flex;
+    gap: 10px;
+    margin-bottom: 2rem;
+    background: rgba(30, 41, 59, 0.5);
+    padding: 5px;
+    border-radius: 12px;
+}
+
+.tab-btn {
+    flex: 1;
+    padding: 12px;
+    border: none;
+    background: transparent;
+    color: #94a3b8;
+    cursor: pointer;
+    border-radius: 8px;
+    font-size: 0.7rem;
+    font-weight: bold;
+}
+
+.tab-btn.active {
+    background: #06b6d4;
+    color: white;
+}
+
+/* Form Controls */
+.input-group {
+    text-align: left;
+    margin-bottom: 1.5rem;
+}
+
+.input-group label {
+    display: block;
+    font-size: 0.8rem;
+    color: #64748b;
+    margin-bottom: 5px;
+}
+
+.input-group input {
+    width: 100%;
+    background: rgba(15, 23, 42, 0.9);
+    border: 1px solid #334155;
+    padding: 12px;
+    border-radius: 8px;
+    color: white;
+}

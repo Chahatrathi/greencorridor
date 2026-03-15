@@ -1,0 +1,207 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <title>Admin Dashboard | Northern Grid IoT</title>
+    <style>
+        :root { --accent: #06b6d4; --bg: #020617; --success: #22c55e; --danger: #ef4444; --panel: #0f172a; }
+        body { margin: 0; display: flex; height: 100vh; background: var(--bg); color: white; font-family: 'Segoe UI', sans-serif; overflow: hidden; }
+        
+        /* Fleet Selection Overlay */
+        #fleet-overlay { position: fixed; inset: 0; background: var(--bg); z-index: 10000; display: flex; flex-direction: column; align-items: center; justify-content: center; padding: 20px; }
+        .fleet-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(280px, 1fr)); gap: 20px; width: 100%; max-width: 1000px; margin-top: 30px; }
+        .ambulance-card { background: var(--panel); border: 1px solid #1e293b; padding: 20px; border-radius: 12px; transition: 0.3s; cursor: pointer; }
+        .ambulance-card:hover { border-color: var(--accent); transform: translateY(-5px); box-shadow: 0 10px 30px rgba(6, 182, 212, 0.2); }
+        .ambulance-card h3 { margin: 0; color: var(--accent); }
+        .eta-pill { background: rgba(34, 197, 94, 0.1); color: var(--success); padding: 4px 10px; border-radius: 50px; font-size: 0.8rem; font-weight: bold; margin-top: 10px; display: inline-block; }
+
+        #map { flex-grow: 1; height: 100%; background: #000; position: relative; }
+        .sidebar { width: 350px; background: var(--panel); padding: 25px; border-right: 1px solid var(--accent); overflow-y: auto; z-index: 10; display: flex; flex-direction: column; flex-shrink: 0; }
+        .stats-container { background: rgba(6, 182, 212, 0.05); border: 1px solid rgba(6, 182, 212, 0.2); padding: 15px; border-radius: 12px; margin-bottom: 20px; text-align: center; }
+        .stats-value { font-size: 2.2rem; font-weight: 900; color: var(--success); }
+        
+        .btn { width: 100%; padding: 12px; margin-top: 10px; cursor: pointer; border-radius: 6px; font-weight: bold; border: 1px solid var(--accent); background: transparent; color: var(--accent); transition: 0.3s; text-transform: uppercase; }
+        .btn:hover { background: var(--accent); color: black; }
+
+        #arrival-screen { position: fixed; inset: 0; background: var(--success); display: none; flex-direction: column; justify-content: center; align-items: center; z-index: 9999; color: white; text-align: center; }
+        .path-label { background: rgba(0,0,0,0.9); color: #fff; padding: 4px 10px; border-radius: 4px; font-size: 11px; font-weight: 900; border: 2px solid; position: absolute; transform: translate(-50%, -50%); white-space: nowrap; z-index: 500; }
+        .signal-tag { background: rgba(0,0,0,0.8); color: #fff; padding: 2px 6px; border-radius: 3px; font-size: 9px; border: 1px solid #444; position: absolute; transform: translate(-50%, -140%); pointer-events: none; white-space: nowrap; }
+    </style>
+</head>
+<body>
+
+    <div id="fleet-overlay">
+        <h1 style="letter-spacing: 2px;">NORTHERN GRID CONTROL</h1>
+        <p style="color: #64748b;">Select an available unit to begin 400m IoT Optimized Corridor</p>
+        <div class="fleet-grid" id="fleet-list"></div>
+    </div>
+
+    <div id="arrival-screen">
+        <h1 style="font-size: 4rem; margin: 0;">MISSION SUCCESSFUL</h1>
+        <p id="arrival-msg" style="font-size: 1.5rem; margin-top: 10px;">Awaiting final telemetry...</p>
+        <button class="btn" style="width:240px; background:white; color:black; margin-top:30px;" onclick="location.reload()">NEW DISPATCH</button>
+    </div>
+
+    <div class="sidebar">
+        <h2 style="color:var(--accent); margin-top:0;">ADMIN CONSOLE</h2>
+        <div class="stats-container">
+            <div style="font-size: 0.7rem; color: #94a3b8; letter-spacing: 2px;">TIME SAVED (EST)</div>
+            <div id="time-saved-val" class="stats-value">00:00</div>
+        </div>
+        <div style="margin-bottom: 15px; font-size: 0.8rem; color: #94a3b8;">UNIT: <b id="unit-id" style="color:white;">--</b></div>
+        <button class="btn" style="border-color:var(--success); color:var(--success);" onclick="dispatch()">DISPATCH UNIT</button>
+        <hr style="border: 0; border-top: 1px solid #1e293b; margin: 20px 0;">
+        
+        <h3>IOT STATUS (400M RANGE)</h3>
+        <div id="sig-0" style="padding:12px; background:rgba(0,0,0,0.2); border-radius:6px; margin-bottom:8px;">
+            Alpha Signal: <b style="color:var(--danger)">RED</b>
+        </div>
+        <div id="sig-1" style="padding:12px; background:rgba(0,0,0,0.2); border-radius:6px;">
+            Beta Signal: <b style="color:var(--danger)">RED</b>
+        </div>
+
+        <div style="margin-top: auto;">
+            <button class="btn" onclick="socket.emit('download_logs')">HISTORY</button>
+            <button class="btn" style="border-color:var(--danger); color:var(--danger);" onclick="location.reload();">RESET</button>
+        </div>
+    </div>
+
+    <div id="map"></div>
+
+    <script src="https://cdn.socket.io/4.7.2/socket.io.min.js"></script>
+    <script src="https://maps.googleapis.com/maps/api/js?key=AIzaSyCq2ShsZagVlWdZjVDNMniBAJzp_5yzMuU&libraries=geometry&callback=initMap" async defer></script>
+    
+    <script>
+        const socket = io();
+        let map, directionsService, mainRenderer, ambMarker;
+        let selectedAmbulance = null;
+        const adminLoc = { lat: 28.6129, lng: 77.2110 };
+        
+        const fleet = [
+            { id: 'DL-4C-1234', pos: { lat: 28.6280, lng: 77.2210 }, eta: '4 mins' },
+            { id: 'DL-8B-5678', pos: { lat: 28.6000, lng: 77.1900 }, eta: '9 mins' }
+        ];
+
+        const signalData = [
+            { id: 0, label: "Alpha", pos: { lat: 28.6210, lng: 77.2150 } },
+            { id: 1, label: "Beta", pos: { lat: 28.6160, lng: 77.2180 } }
+        ];
+
+        function initMap() {
+            const roadStyle = [{"elementType":"geometry","stylers":[{"color":"#212121"}]},{"featureType":"road","elementType":"geometry.fill","stylers":[{"color":"#2c2c2c"}]},{"featureType":"water","elementType":"geometry","stylers":[{"color":"#000000"}]}];
+            map = new google.maps.Map(document.getElementById("map"), { zoom: 14, center: adminLoc, styles: roadStyle, disableDefaultUI: true });
+            directionsService = new google.maps.DirectionsService();
+            mainRenderer = new google.maps.DirectionsRenderer({ map: map, suppressMarkers: true, polylineOptions: { strokeColor: "#06b6d4", strokeWeight: 8 } });
+            
+            renderFleetCards();
+            
+            signalData.forEach(s => {
+                s.circle = new google.maps.Circle({ strokeColor: '#ef4444', map: map, center: s.pos, radius: 400, fillOpacity: 0.1, fillColor: '#ef4444' });
+                addSignalLabel(s.pos, s.label);
+            });
+        }
+
+        function renderFleetCards() {
+            const list = document.getElementById('fleet-list');
+            fleet.forEach(amb => {
+                const card = document.createElement('div');
+                card.className = 'ambulance-card';
+                card.innerHTML = `<h3>${amb.id}</h3><div class="eta-pill">ETA: ${amb.eta}</div>`;
+                card.onclick = () => {
+                    selectedAmbulance = amb;
+                    document.getElementById('fleet-overlay').style.display = 'none';
+                    document.getElementById('unit-id').innerText = amb.id;
+                    ambMarker = new google.maps.Marker({ map: map, position: amb.pos, icon: { url: "https://cdn-icons-png.flaticon.com/512/1048/1048313.png", scaledSize: new google.maps.Size(35, 35) } });
+                    map.panTo(amb.pos);
+                };
+                list.appendChild(card);
+            });
+        }
+
+        function dispatch() {
+            if (!selectedAmbulance) return;
+            socket.emit('start_emergency', { vehicle_id: selectedAmbulance.id, start_pos: selectedAmbulance.pos, end_pos: adminLoc });
+
+            directionsService.route({ origin: selectedAmbulance.pos, destination: adminLoc, travelMode: 'DRIVING', provideRouteAlternatives: true }, (res, status) => {
+                if (status === "OK") {
+                    const sorted = [...res.routes].sort((a, b) => a.legs[0].duration.value - b.legs[0].duration.value);
+                    if(window.altRenderers) window.altRenderers.forEach(r => r.setMap(null));
+                    window.altRenderers = [];
+
+                    sorted.forEach((route, index) => {
+                        const isMain = index === 0;
+                        const renderer = new google.maps.DirectionsRenderer({ map: map, directions: res, routeIndex: res.routes.indexOf(route), suppressMarkers: true,
+                            polylineOptions: { strokeColor: isMain ? "#06b6d4" : "#ef4444", strokeWeight: isMain ? 8 : 4, strokeOpacity: isMain ? 1 : 0.4 }
+                        });
+                        if (!isMain) window.altRenderers.push(renderer);
+                        else mainRenderer = renderer;
+
+                        const mid = route.overview_path[Math.floor(route.overview_path.length/2)];
+                        addPathLabel(mid, `${isMain ? 'AI' : 'ALT'}: ${route.legs[0].duration.text}`, isMain ? "#06b6d4" : "#ef4444");
+                    });
+
+                    if (sorted.length > 1) {
+                        const saved = sorted[1].legs[0].duration.value - sorted[0].legs[0].duration.value;
+                        document.getElementById('time-saved-val').innerText = `${Math.floor(saved/60).toString().padStart(2,'0')}:${(saved%60).toString().padStart(2,'0')}`;
+                    }
+                    animate(sorted[0].overview_path);
+                }
+            });
+        }
+
+        function animate(path) {
+            let i = 0;
+            const timer = setInterval(() => {
+                if (i >= path.length - 1) { 
+                    clearInterval(timer);
+                    document.getElementById('arrival-screen').style.display = 'flex';
+                    return; 
+                }
+                const pos = path[i+1]; ambMarker.setPosition(pos); map.panTo(pos);
+                
+                signalData.forEach(s => {
+                    const dist = google.maps.geometry.spherical.computeDistanceBetween(pos, new google.maps.LatLng(s.pos.lat, s.pos.lng));
+                    const sigBar = document.querySelector(`#sig-${s.id} b`);
+                    if (dist < 400) { // Sync with 400m
+                        s.circle.setOptions({strokeColor: '#22c55e', fillColor: '#22c55e'});
+                        if(sigBar) { sigBar.innerText = "GREEN (IOT)"; sigBar.style.color = "var(--success)"; }
+                    } else {
+                        s.circle.setOptions({strokeColor: '#ef4444', fillColor: '#ef4444'});
+                        if(sigBar) { sigBar.innerText = "RED"; sigBar.style.color = "var(--danger)"; }
+                    }
+                });
+                i++;
+            }, 400);
+        }
+
+        function addPathLabel(latLng, text, color) {
+            const overlay = new google.maps.OverlayView();
+            overlay.onAdd = function() {
+                const div = document.createElement('div'); div.className = 'path-label'; div.style.borderColor = color; div.innerText = text;
+                this.getPanes().overlayLayer.appendChild(div); this.div = div;
+            };
+            overlay.draw = function() { const pt = this.getProjection().fromLatLngToDivPixel(latLng); this.div.style.left = pt.x + 'px'; this.div.style.top = pt.y + 'px'; };
+            overlay.setMap(map);
+        }
+
+        function addSignalLabel(latLng, text) {
+            const overlay = new google.maps.OverlayView();
+            overlay.onAdd = function() {
+                const div = document.createElement('div'); div.className = 'signal-tag'; div.innerText = text;
+                this.getPanes().overlayLayer.appendChild(div); this.div = div;
+            };
+            overlay.draw = function() { const pt = this.getProjection().fromLatLngToDivPixel(latLng); this.div.style.left = pt.x + 'px'; this.div.style.top = pt.y + 'px'; };
+            overlay.setMap(map);
+        }
+
+        socket.on('log_saved_success', (data) => {
+            document.getElementById('arrival-msg').innerHTML = `
+                Mission Successful by ${data.vehicle_id}<br>
+                <span style="color:var(--bg); background:white; padding:2px 10px; border-radius:4px; font-weight:bold; display:inline-block; margin-top:10px;">
+                    Hospital: ${data.hospital} | Final Time: ${data.duration}s
+                </span>
+            `;
+        });
+    </script>
+</body>
+</html>

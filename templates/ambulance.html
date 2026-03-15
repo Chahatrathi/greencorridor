@@ -1,0 +1,248 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <title>Driver POV | Northern Grid IoT</title>
+    <script src="https://cdn.socket.io/4.7.2/socket.io.min.js"></script>
+    <style>
+        :root { --accent: #06b6d4; --bg: #020617; --success: #22c55e; --danger: #ef4444; --panel: #0f172a; --warning: #eab308; }
+        body { margin: 0; background: var(--bg); color: white; font-family: 'Segoe UI', sans-serif; overflow: hidden; }
+        #map { height: 100vh; width: 100%; opacity: 0; transition: 0.8s ease; background: #000; }
+
+        /* Emergency Alert Overlay */
+        #emergency-overlay { position: fixed; inset: 0; display: none; flex-direction: column; justify-content: center; align-items: center; z-index: 9999; background: var(--danger); animation: pulse-red 1s infinite; }
+        @keyframes pulse-red { 0% { background: #7f1d1d; } 50% { background: #ef4444; } 100% { background: #7f1d1d; } }
+        
+        /* Arrival UI */
+        #arrival-overlay { position: fixed; inset: 0; background: var(--success); display: none; flex-direction: column; justify-content: center; align-items: center; z-index: 9000; color: white; text-align: center; }
+
+        /* Hospital Selection Grid */
+        #hospital-selection { position: fixed; bottom: 20px; left: 50%; transform: translateX(-50%); width: 95%; max-width: 950px; background: var(--panel); border: 2px solid var(--accent); border-radius: 15px; padding: 15px; display: none; z-index: 8000; box-shadow: 0 -10px 50px rgba(0,0,0,0.9); }
+        .hosp-grid { display: grid; grid-template-columns: repeat(5, 1fr); gap: 10px; margin-top: 15px; }
+        .hosp-card { background: rgba(255,255,255,0.05); padding: 10px; border-radius: 10px; border: 1px solid #334155; cursor: pointer; transition: 0.2s; text-align: center; display: flex; flex-direction: column; align-items: center; }
+        .hosp-card:hover { border-color: var(--accent); background: rgba(6, 182, 212, 0.1); transform: translateY(-5px); }
+        .hosp-card img { width: 30px; margin-bottom: 5px; }
+
+        /* Summary & Path Tags */
+        #mission-summary { position: fixed; inset: 0; background: var(--bg); z-index: 10000; display: none; flex-direction: column; align-items: center; justify-content: center; padding: 40px; }
+        .summary-card { border: 2px solid var(--accent); padding: 40px; border-radius: 20px; background: var(--panel); max-width: 450px; width: 100%; text-align: center; }
+        .path-label { background: rgba(0, 0, 0, 0.95); color: white; padding: 4px 10px; border-radius: 4px; border: 2px solid; font-size: 11px; font-weight: 900; position: absolute; transform: translate(-50%, -50%); white-space: nowrap; z-index: 1000; box-shadow: 0 4px 10px rgba(0,0,0,0.5); }
+        
+        .btn { padding: 12px 35px; border-radius: 50px; border: none; font-weight: bold; cursor: pointer; text-transform: uppercase; letter-spacing: 1px; }
+        .btn-main { background: white; color: black; margin-top: 15px; }
+    </style>
+</head>
+<body>
+    <audio id="siren" loop src="https://www.soundjay.com/buttons/sounds/beep-01a.mp3"></audio>
+
+    <div id="emergency-overlay">
+        <h1 style="font-size: 4rem; margin: 0;">🚨 EMERGENCY</h1>
+        <button class="btn btn-main" onclick="startMission()">ACCEPT & START</button>
+    </div>
+
+    <div id="arrival-overlay">
+        <h1 style="font-size: 2.5rem; margin:0;">PATIENT SECURED</h1>
+        <button class="btn btn-main" onclick="showHospitalSelector()">SELECT BEST HOSPITAL</button>
+    </div>
+
+    <div id="mission-summary">
+        <div class="summary-card">
+            <h1 style="color: var(--success); margin:0;">MISSION COMPLETE</h1>
+            <div id="summary-content" style="margin: 20px 0; text-align: left; font-size: 0.9rem; line-height: 1.6;"></div>
+            <button class="btn btn-main" style="background: var(--accent); color: black;" onclick="location.reload()">CLOSE & RESET</button>
+        </div>
+    </div>
+
+    <div id="hospital-selection">
+        <h3 style="margin:0; color:var(--accent); text-align: center;">AI HOSPITAL LOCATOR (DELHI/NCR)</h3>
+        <div class="hosp-grid" id="hosp-list"></div>
+    </div>
+
+    <div id="map"></div>
+
+    <script src="https://maps.googleapis.com/maps/api/js?key=AIzaSyCq2ShsZagVlWdZjVDNMniBAJzp_5yzMuU&libraries=geometry&callback=initMap" async defer></script>
+    
+    <script>
+        const socket = io();
+        let map, ambMarker, currentRouteRes, vehicleID, startTime;
+        window.activeRenderers = [];
+        window.activeLabels = [];
+
+        // Updated Signal Points with 400m Radius Specification
+        const signalData = [
+            { id: 0, pos: { lat: 28.6210, lng: 77.2150 } }, 
+            { id: 1, pos: { lat: 28.6160, lng: 77.2180 } }
+        ];
+
+        function initMap() {
+            const roadStyle = [{"elementType":"geometry","stylers":[{"color":"#212121"}]},{"featureType":"road","elementType":"geometry.fill","stylers":[{"color":"#2c2c2c"}]},{"featureType":"water","elementType":"geometry","stylers":[{"color":"#000000"}]}];
+            map = new google.maps.Map(document.getElementById("map"), { zoom: 13, center: { lat: 28.6139, lng: 77.2090 }, styles: roadStyle, disableDefaultUI: true });
+            new google.maps.TrafficLayer().setMap(map);
+            ambMarker = new google.maps.Marker({ map: map, icon: { url: "https://cdn-icons-png.flaticon.com/512/1048/1048313.png", scaledSize: new google.maps.Size(40, 40) } });
+
+            // Initialize 400m Signal Overrides
+            signalData.forEach(s => {
+                s.circle = new google.maps.Circle({ 
+                    strokeColor: '#ef4444', map: map, center: s.pos, radius: 400, // Updated to 400m
+                    fillOpacity: 0.1, fillColor: '#ef4444' 
+                });
+            });
+        }
+
+        socket.on('admin_alert', (data) => {
+            vehicleID = data.vehicle_id;
+            document.getElementById('emergency-overlay').style.display = 'flex';
+            document.getElementById('siren').play().catch(() => {});
+            const ds = new google.maps.DirectionsService();
+            ds.route({ origin: data.start_pos, destination: data.end_pos, travelMode: 'DRIVING' }, (res) => {
+                currentRouteRes = res;
+                renderPaths(res, false);
+            });
+        });
+
+        function renderPaths(res, showLabels) {
+            window.activeRenderers.forEach(r => r.setMap(null));
+            window.activeLabels.forEach(l => l.setMap(null));
+            window.activeRenderers = [];
+            window.activeLabels = [];
+
+            const routes = res.routes.sort((a, b) => a.legs[0].duration.value - b.legs[0].duration.value);
+            routes.forEach((route, index) => {
+                const isAI = index === 0;
+                const color = isAI ? "#22c55e" : "#ef4444";
+                const renderer = new google.maps.DirectionsRenderer({
+                    map: map, directions: res, routeIndex: res.routes.indexOf(route), suppressMarkers: true,
+                    polylineOptions: { strokeColor: color, strokeWeight: isAI ? 8 : 4, strokeOpacity: isAI ? 1 : 0.5, zIndex: isAI ? 100 : 50 }
+                });
+                window.activeRenderers.push(renderer);
+                if (showLabels) {
+                    const mid = route.overview_path[Math.floor(route.overview_path.length / 2)];
+                    addPathTag(mid, isAI ? `AI PATH: ${route.legs[0].duration.text}` : `ALT: ${route.legs[0].duration.text}`, color);
+                }
+            });
+        }
+
+        function addPathTag(latLng, text, color) {
+            const overlay = new google.maps.OverlayView();
+            overlay.onAdd = function() {
+                const div = document.createElement('div');
+                div.className = 'path-label';
+                div.style.borderColor = color;
+                div.innerText = text;
+                this.getPanes().overlayLayer.appendChild(div);
+                this.div = div;
+            };
+            overlay.draw = function() {
+                const pt = this.getProjection().fromLatLngToDivPixel(latLng);
+                this.div.style.left = pt.x + 'px';
+                this.div.style.top = pt.y + 'px';
+            };
+            overlay.setMap(map);
+            window.activeLabels.push(overlay);
+        }
+
+        function startMission() {
+            startTime = Date.now();
+            document.getElementById('emergency-overlay').style.display = 'none';
+            document.getElementById('siren').pause();
+            document.getElementById('map').style.opacity = "1";
+            animate(currentRouteRes.routes[0].overview_path, () => {
+                document.getElementById('arrival-overlay').style.display = 'flex';
+            });
+        }
+
+        function showHospitalSelector() {
+            document.getElementById('arrival-overlay').style.display = 'none';
+            document.getElementById('hospital-selection').style.display = 'block';
+            
+            const hospitalData = [
+                { name: "AIIMS DELHI", pos: { lat: 28.5672, lng: 77.2100 }, beds: 15 },
+                { name: "MAX SAKET", pos: { lat: 28.5276, lng: 77.2120 }, beds: 4 },
+                { name: "APOLLO DELHI", pos: { lat: 28.5360, lng: 77.2860 }, beds: 9 },
+                { name: "FORTIS NOIDA", pos: { lat: 28.6189, lng: 77.3710 }, beds: 6 },
+                { name: "MEDANTA GGM", pos: { lat: 28.4428, lng: 77.0425 }, beds: 11 }
+            ];
+
+            const service = new google.maps.DistanceMatrixService();
+            service.getDistanceMatrix({
+                origins: [ambMarker.getPosition()],
+                destinations: hospitalData.map(h => h.pos),
+                travelMode: 'DRIVING',
+                drivingOptions: { departureTime: new Date(), trafficModel: 'bestguess' }
+            }, (response, status) => {
+                if (status === 'OK') {
+                    renderHospitals(hospitalData, response.rows[0].elements);
+                }
+            });
+        }
+
+        function renderHospitals(hospitals, travelData) {
+            const list = document.getElementById('hosp-list');
+            list.innerHTML = ''; 
+            hospitals.forEach((h, i) => {
+                const data = travelData[i];
+                const timeStr = data.duration_in_traffic ? data.duration_in_traffic.text : data.duration.text;
+                const ratio = (data.duration_in_traffic ? data.duration_in_traffic.value : data.duration.value) / data.duration.value;
+                let tStatus = "Light Traffic"; let tColor = "var(--success)";
+                if (ratio > 1.4) { tStatus = "Heavy Traffic"; tColor = "var(--danger)"; }
+                else if (ratio > 1.1) { tStatus = "Moderate Traffic"; tColor = "var(--warning)"; }
+
+                const card = document.createElement('div');
+                card.className = 'hosp-card';
+                card.innerHTML = `
+                    <img src="https://cdn-icons-png.flaticon.com/512/3063/3063205.png">
+                    <b style="font-size:0.7rem; color:white;">${h.name}</b>
+                    <div style="font-size:0.8rem; color:var(--accent); font-weight:bold; margin:3px 0;">${timeStr}</div>
+                    <div style="font-size:0.6rem; color:${tColor}; font-weight:bold;">${tStatus}</div>
+                    <div style="font-size:0.6rem; color:#94a3b8;">Beds: ${h.beds}</div>
+                `;
+                card.onclick = () => {
+                    document.getElementById('hospital-selection').style.display = 'none';
+                    startFinalTransport(h, tStatus, timeStr);
+                };
+                list.appendChild(card);
+            });
+        }
+
+        function startFinalTransport(h, traffic, eta) {
+            new google.maps.Marker({
+                position: h.pos, map: map,
+                label: { text: h.name, color: "white", fontSize: "11px", fontWeight: "bold" },
+                icon: { url: "https://cdn-icons-png.flaticon.com/512/3063/3063205.png", scaledSize: new google.maps.Size(45, 45) }
+            });
+            const ds = new google.maps.DirectionsService();
+            ds.route({ origin: ambMarker.getPosition(), destination: h.pos, travelMode: 'DRIVING', provideRouteAlternatives: true }, (res) => {
+                renderPaths(res, true);
+                animate(res.routes[0].overview_path, () => {
+                    document.getElementById('summary-content').innerHTML = `
+                        <p><b>Unit:</b> ${vehicleID || "DL-4C-1234"}</p>
+                        <p><b>Hospital:</b> ${h.name}</p>
+                        <p><b>Travel Time:</b> ${eta}</p>
+                        <p><b>Traffic encountered:</b> ${traffic}</p>
+                    `;
+                    document.getElementById('mission-summary').style.display = 'flex';
+                });
+            });
+        }
+
+        function animate(path, onDone) {
+            let i = 0;
+            const timer = setInterval(() => {
+                if (i >= path.length - 1) { clearInterval(timer); if(onDone) onDone(); return; }
+                const pos = path[i+1]; ambMarker.setPosition(pos); map.panTo(pos);
+                
+                // IoT SIGNAL LOGIC: Triggered at 400m
+                signalData.forEach(s => {
+                    const dist = google.maps.geometry.spherical.computeDistanceBetween(pos, new google.maps.LatLng(s.pos.lat, s.pos.lng));
+                    if (dist < 400) { // Updated to 400m
+                        s.circle.setOptions({strokeColor: '#22c55e', fillColor: '#22c55e'});
+                    } else {
+                        s.circle.setOptions({strokeColor: '#ef4444', fillColor: '#ef4444'});
+                    }
+                });
+                i++;
+            }, 400);
+        }
+    </script>
+</body>
+</html>

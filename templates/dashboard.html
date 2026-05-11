@@ -151,18 +151,23 @@
 
         function animate(path) {
             let i = 0;
+            let hardwareActive = false;
+
             const timer = setInterval(() => {
                 if (i >= path.length - 1) { 
                     clearInterval(timer);
                     document.getElementById('arrival-screen').style.display = 'flex';
+                    socket.emit('update_hardware_signal', { status: 'red' });
                     return; 
                 }
                 const pos = path[i+1]; ambMarker.setPosition(pos); map.panTo(pos);
                 
+                let inAnyZone = false;
                 signalData.forEach(s => {
                     const dist = google.maps.geometry.spherical.computeDistanceBetween(pos, new google.maps.LatLng(s.pos.lat, s.pos.lng));
                     const sigBar = document.querySelector(`#sig-${s.id} b`);
-                    if (dist < 400) { // Sync with 400m
+                    if (dist < 400) { 
+                        inAnyZone = true;
                         s.circle.setOptions({strokeColor: '#22c55e', fillColor: '#22c55e'});
                         if(sigBar) { sigBar.innerText = "GREEN (IOT)"; sigBar.style.color = "var(--success)"; }
                     } else {
@@ -170,6 +175,16 @@
                         if(sigBar) { sigBar.innerText = "RED"; sigBar.style.color = "var(--danger)"; }
                     }
                 });
+
+                // PHYSICAL HARDWARE BRIDGE
+                if (inAnyZone && !hardwareActive) {
+                    socket.emit('update_hardware_signal', { status: 'green' });
+                    hardwareActive = true;
+                } else if (!inAnyZone && hardwareActive) {
+                    socket.emit('update_hardware_signal', { status: 'red' });
+                    hardwareActive = false;
+                }
+
                 i++;
             }, 400);
         }

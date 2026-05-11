@@ -68,7 +68,6 @@
         window.activeRenderers = [];
         window.activeLabels = [];
 
-        // Signal Points with 400m Radius Specification
         const signalData = [
             { id: 0, pos: { lat: 28.6210, lng: 77.2150 } }, 
             { id: 1, pos: { lat: 28.6160, lng: 77.2180 } }
@@ -80,10 +79,9 @@
             new google.maps.TrafficLayer().setMap(map);
             ambMarker = new google.maps.Marker({ map: map, icon: { url: "https://cdn-icons-png.flaticon.com/512/1048/1048313.png", scaledSize: new google.maps.Size(40, 40) } });
 
-            // Initialize 400m Signal Overrides
             signalData.forEach(s => {
                 s.circle = new google.maps.Circle({ 
-                    strokeColor: '#ef4444', map: map, center: s.pos, radius: 400, 
+                    strokeColor: '#ef4444', map: map, center: s.pos, radius: 400,
                     fillOpacity: 0.1, fillColor: '#ef4444' 
                 });
             });
@@ -227,19 +225,41 @@
 
         function animate(path, onDone) {
             let i = 0;
+            let hardwareActive = false; // Prevents spamming the server
+
             const timer = setInterval(() => {
-                if (i >= path.length - 1) { clearInterval(timer); if(onDone) onDone(); return; }
-                const pos = path[i+1]; ambMarker.setPosition(pos); map.panTo(pos);
+                if (i >= path.length - 1) { 
+                    clearInterval(timer); 
+                    if(onDone) onDone();
+                    // Reset to red upon mission finish
+                    socket.emit('update_hardware_signal', { status: 'red' });
+                    return; 
+                }
                 
+                const pos = path[i+1]; 
+                ambMarker.setPosition(pos); 
+                map.panTo(pos);
                 
+                let inAnyZone = false;
                 signalData.forEach(s => {
                     const dist = google.maps.geometry.spherical.computeDistanceBetween(pos, new google.maps.LatLng(s.pos.lat, s.pos.lng));
-                    if (dist < 400) { 
+                    if (dist < 400) {
+                        inAnyZone = true;
                         s.circle.setOptions({strokeColor: '#22c55e', fillColor: '#22c55e'});
                     } else {
                         s.circle.setOptions({strokeColor: '#ef4444', fillColor: '#ef4444'});
                     }
                 });
+
+                // PHYSICAL HARDWARE BRIDGE
+                if (inAnyZone && !hardwareActive) {
+                    socket.emit('update_hardware_signal', { status: 'green' });
+                    hardwareActive = true;
+                } else if (!inAnyZone && hardwareActive) {
+                    socket.emit('update_hardware_signal', { status: 'red' });
+                    hardwareActive = false;
+                }
+
                 i++;
             }, 400);
         }

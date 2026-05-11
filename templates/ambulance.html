@@ -68,7 +68,7 @@
         window.activeRenderers = [];
         window.activeLabels = [];
 
-        // Updated Signal Points with 400m Radius Specification
+        // Signal Points with 400m Radius Specification
         const signalData = [
             { id: 0, pos: { lat: 28.6210, lng: 77.2150 } }, 
             { id: 1, pos: { lat: 28.6160, lng: 77.2180 } }
@@ -83,7 +83,7 @@
             // Initialize 400m Signal Overrides
             signalData.forEach(s => {
                 s.circle = new google.maps.Circle({ 
-                    strokeColor: '#ef4444', map: map, center: s.pos, radius: 400, // Updated to 400m
+                    strokeColor: '#ef4444', map: map, center: s.pos, radius: 400, 
                     fillOpacity: 0.1, fillColor: '#ef4444' 
                 });
             });
@@ -231,10 +231,10 @@
                 if (i >= path.length - 1) { clearInterval(timer); if(onDone) onDone(); return; }
                 const pos = path[i+1]; ambMarker.setPosition(pos); map.panTo(pos);
                 
-                // IoT SIGNAL LOGIC: Triggered at 400m
+                
                 signalData.forEach(s => {
                     const dist = google.maps.geometry.spherical.computeDistanceBetween(pos, new google.maps.LatLng(s.pos.lat, s.pos.lng));
-                    if (dist < 400) { // Updated to 400m
+                    if (dist < 400) { 
                         s.circle.setOptions({strokeColor: '#22c55e', fillColor: '#22c55e'});
                     } else {
                         s.circle.setOptions({strokeColor: '#ef4444', fillColor: '#ef4444'});

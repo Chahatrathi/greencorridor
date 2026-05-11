@@ -3,7 +3,7 @@ const socket = io();
 function startTrip() {
     const vehicleData = {
         vehicle: "UK-07-AMB-999",
-        lat: 30.3165, // Dehradun coordinates
+        lat: 30.3165, 
         lng: 78.0322
     };
     
